@@ -1,0 +1,107 @@
+---
+- hosts: all
+  tasks:
+    - name: Set local timezone
+      file:
+        src: /usr/share/zoneinfo/America/New_York
+        path: /etc/localtime
+        state: link
+      tags:
+        - timezone
+    - name: Setup locales
+      block:
+        - name: Configure locale.gen for US-only
+          lineinfile:
+            dest: /etc/locale.gen
+            regexp: '{{ item.regex }}'
+            line: '{{ item.line }}'
+          loop:
+            - {regex: 'en_GB.UTF-8 UTF-8', line: '# en_GB.UTF-8 UTF-8'}
+            - {regex: 'en_US.UTF-8 UTF-8', line: en_US.UTF-8 UTF-8}
+        - name: Generate locales
+          command: locale-gen
+        - name: Set locale
+          command: update-locale LANG=en_US.UTF-8
+      tags:
+        - locales
+    - name: Setup keyboard
+      lineinfile:
+        dest: /etc/default/keyboard
+        regexp: 'XKBLAYOUT=gb'
+        line: 'XKBLAYOUT=us'
+      tags:
+        - keyboard
+    - name: Set hostname
+      copy:
+        content: '{{ inventory_hostname }}'
+        dest: /etc/hostname
+      tags:
+        - hostname
+    - name: Set up sudo
+      block:
+        - name: Create wheel group
+          group:
+            name: wheel
+        - name: Give passwordless sudo access to wheel group
+          copy:
+            content: '%wheel ALL=(ALL) NOPASSWD: ALL'
+            dest: /etc/sudoers.d/wheel
+            validate: /usr/sbin/visudo --check --file=%s
+      tags:
+        - sudo
+    - name: Enable ssh
+      service:
+        name: ssh
+        enabled: yes
+      tags:
+        - ssh
+    - name: Setup user account
+      block:
+        - name: Create new user account
+          user:
+            name: '{{ user_name }}'
+            password: '{{ user_password }}'
+            groups: wheel
+            append: yes
+        - name: Create user's ssh directory
+          file:
+            path: /home/{{ user_name }}/.ssh
+            mode: 0700
+            owner: '{{ user_name }}'
+            group: '{{ user_name }}'
+            state: directory
+        - name: Copy over ssh key from current Ansible controller as an authorized key
+          copy:
+            src: '{{ lookup("env", "HOME") }}/.ssh/id_ed25519.pub'
+            dest: /home/{{ user_name }}/.ssh/authorized_keys
+            mode: 0600
+            owner: '{{ user_name }}'
+            group: '{{ user_name }}'
+      tags:
+        - user_account
+    - name: Tasks done as the new user
+      block:
+        - name: Delete pi user
+          block:
+            - name: Delete pi user account
+              user:
+                name: pi
+                force: yes
+                state: absent
+            - name: Remove passwordless sudo access for pi account
+              file:
+                path: /etc/sudoers.d/010_pi-nopasswd
+                state: absent
+          tags:
+            - delete_pi
+        - name: Reboot
+          reboot:
+            connect_timeout: 1
+            reboot_timeout: 1
+          failed_when: false
+          tags:
+            - reboot
+      vars:
+        ansible_user: '{{ user_name }}'
+      tags:
+        - new_user
