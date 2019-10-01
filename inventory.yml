@@ -3,4 +3,5 @@ all:
   children:
     home:
       hosts:
+        dickens:
         timemachine:
